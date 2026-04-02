@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Sentinel Bot - Officer Recognition Dashboard</title>
+    <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Arial; background: #0a0a1a; color: white; padding: 20px; }
+        .header { text-align: center; margin-bottom: 30px; }
+        .dashboard { display: flex; gap: 20px; flex-wrap: wrap; }
+        .video-panel { flex: 2; min-width: 640px; background: #1a1a2e; border-radius: 10px; padding: 15px; }
+        .alerts-panel { flex: 1; min-width: 300px; background: #1a1a2e; border-radius: 10px; padding: 15px; }
+        .video-container { position: relative; background: #000; border-radius: 8px; overflow: hidden; }
+        #videoFeed { width: 100%; height: auto; display: block; }
+        .alert { padding: 12px; margin: 10px 0; border-radius: 6px; animation: slideIn 0.3s; }
+        .alert-escort { background: linear-gradient(135deg, #e74c3c, #c0392b); border-left: 4px solid #ff6b6b; }
+        .alert-parking { background: linear-gradient(135deg, #f39c12, #e67e22); border-left: 4px solid #f1c40f; }
+        .alert-system { background: #2c3e50; border-left: 4px solid #3498db; }
+        .detection-card { background: #0f0f1a; padding: 10px; margin: 8px 0; border-radius: 6px; display: flex; align-items: center; gap: 10px; }
+        .detection-officer { border-left: 4px solid #3498db; }
+        .detection-unknown { border-left: 4px solid #e74c3c; }
+        .officer-icon { font-size: 24px; }
+        .officer-name { font-weight: bold; color: #3498db; }
+        .confidence { font-size: 12px; color: #7f8c8d; }
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .status-badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .status-active { background: #27ae60; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 Sentinel IoT Bot - Officer Recognition System</h1>
+        <p>Live face detection | Known officer identification | Escort request handling</p>
+    </div>
+    
+    <div class="dashboard">
+        <div class="video-panel">
+            <h3>📷 Live Camera Feed</h3>
+            <div class="video-container">
+                <img id="videoFeed" src="/video_feed" alt="Video Feed">
+            </div>
+            <div style="margin-top: 10px; font-size: 12px; color: #888;">
+                🟢 Green/Blue box = Recognized Officer | 🔴 Red box = Unknown Person
+            </div>
+        </div>
+        
+        <div class="alerts-panel">
+            <h3>🔔 Real-time Alerts</h3>
+            <div id="alertsList"></div>
+            
+            <h3 style="margin-top: 20px;">👮‍♂️ Detected Persons</h3>
+            <div id="detectionsList"></div>
+            
+            <div style="margin-top: 20px; padding: 10px; background: #0f0f1a; border-radius: 6px;">
+                <h4>📋 Officer Database</h4>
+                <div id="officerList">Loading...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const alertsDiv = document.getElementById('alertsList');
+        const detectionsDiv = document.getElementById('detectionsList');
+        
+        // Play alert sound
+        function playAlert() {
+            const audio = new Audio('https://www.soundjay.com/misc/sounds/bell-ringing-05.mp3');
+            audio.play().catch(e => console.log('Audio play failed'));
+        }
+        
+        // Receive alerts from server
+        socket.on('alert', (data) => {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${data.type}`;
+            
+            if (data.type === 'escort_alert') {
+                alertDiv.innerHTML = `
+                    <strong>🚨 ESCORT REQUEST</strong><br>
+                    📍 Location: ${data.location}<br>
+                    ⚡ Urgency: ${data.urgency}<br>
+                    🕐 ${new Date().toLocaleTimeString()}
+                `;
+                playAlert();
+            } else if (data.type === 'parking_alert') {
+                alertDiv.innerHTML = `
+                    <strong>📸 PARKING VIOLATION</strong><br>
+                    🚗 Plate: ${data.plate || 'Unknown'}<br>
+                    📍 Location: ${data.location || 'Unknown'}
+                `;
+            } else {
+                alertDiv.innerHTML = `<strong>ℹ️ System</strong><br>${data.message || JSON.stringify(data)}`;
+            }
+            
+            alertsDiv.prepend(alertDiv);
+            
+            // Keep only last 10 alerts
+            while (alertsDiv.children.length > 10) {
+                alertsDiv.removeChild(alertsDiv.lastChild);
+            }
+        });
+        
+        // Receive face detections
+        socket.on('detections', (detections) => {
+            detectionsDiv.innerHTML = '';
+            
+            if (detections.length === 0) {
+                detectionsDiv.innerHTML = '<div style="color: #888;">No faces detected</div>';
+            }
+            
+            detections.forEach(det => {
+                const card = document.createElement('div');
+                card.className = `detection-card ${det.is_officer ? 'detection-officer' : 'detection-unknown'}`;
+                
+                const isOfficer = det.is_officer;
+                const icon = isOfficer ? '👮‍♂️' : '👤';
+                const nameColor = isOfficer ? '#3498db' : '#e74c3c';
+                const confidencePercent = Math.round(det.confidence * 100);
+                
+                card.innerHTML = `
+                    <div class="officer-icon">${icon}</div>
+                    <div style="flex: 1;">
+                        <div class="officer-name" style="color: ${nameColor}">${det.name}</div>
+                        <div class="confidence">Confidence: ${confidencePercent}%</div>
+                        <div style="font-size: 11px; color: #555;">${det.is_officer ? '✅ Verified Officer' : '⚠️ Unknown Person'}</div>
+                    </div>
+                `;
+                detectionsDiv.appendChild(card);
+            });
+        });
+        
+        // Load officer list from server
+        async function loadOfficerList() {
+            try {
+                const response = await fetch('http://localhost:8000/officers/list');
+                if (response.ok) {
+                    const officers = await response.json();
+                    const officerListDiv = document.getElementById('officerList');
+                    if (officers.length === 0) {
+                        officerListDiv.innerHTML = '<div style="color: #888;">No officers registered</div>';
+                    } else {
+                        officerListDiv.innerHTML = officers.map(name => 
+                            `<div style="padding: 5px 0;">👮 ${name}</div>`
+                        ).join('');
+                    }
+                }
+            } catch(e) {
+                document.getElementById('officerList').innerHTML = '<div style="color: #888;">Use register_officers.py to add officers</div>';
+            }
+        }
+        
+        loadOfficerList();
+        
+        // Connection status
+        socket.on('connect', () => {
+            console.log('Connected to dashboard');
+        });
+    </script>
+</body>
+</html>
